@@ -1,0 +1,2133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Postmortem Writer — a blameless incident postmortem generator for small engineering teams.">
+  <title>Postmortem Writer</title>
+  <style>
+    :root {
+      --blue: #174a8b;
+      --blue-dark: #123b70;
+      --blue-soft: #eaf1fa;
+      --ink: #17202b;
+      --muted: #687585;
+      --line: #d9e0e8;
+      --surface: #ffffff;
+      --page: #f5f7fa;
+      --amber: #9a6700;
+      --amber-bg: #fff7df;
+      --danger: #a43d3d;
+      --danger-bg: #fff0f0;
+      --green: #28734a;
+      --green-bg: #edf8f1;
+      --radius: 8px;
+      --shadow: 0 2px 10px rgba(23, 32, 43, 0.05);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.5;
+      font-size: 15px;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible,
+    select:focus-visible,
+    textarea:focus-visible {
+      outline: 3px solid rgba(23, 74, 139, 0.2);
+      outline-offset: 1px;
+      border-color: var(--blue);
+    }
+
+    .app-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .header-inner {
+      max-width: 1440px;
+      margin: 0 auto;
+      min-height: 64px;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 750;
+      letter-spacing: -0.02em;
+      white-space: nowrap;
+    }
+
+    .brand-subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .saved-status {
+      color: var(--muted);
+      font-size: 12px;
+      margin-right: 4px;
+      min-width: 45px;
+      text-align: right;
+    }
+
+    .button {
+      border: 1px solid var(--line);
+      background: var(--surface);
+      color: var(--ink);
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 600;
+      font-size: 13px;
+      line-height: 1.2;
+      min-height: 36px;
+      transition: border-color 0.15s, background 0.15s, color 0.15s;
+    }
+
+    .button:hover {
+      border-color: #aab6c5;
+      background: #fafbfd;
+    }
+
+    .button.primary {
+      background: var(--blue);
+      border-color: var(--blue);
+      color: white;
+    }
+
+    .button.primary:hover {
+      background: var(--blue-dark);
+      border-color: var(--blue-dark);
+    }
+
+    .button.danger:hover {
+      color: var(--danger);
+      border-color: #d7a3a3;
+      background: var(--danger-bg);
+    }
+
+    .app {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(360px, 0.9fr) minmax(480px, 1.1fr);
+      gap: 24px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .form-panel {
+      padding: 22px;
+    }
+
+    .preview-column {
+      min-width: 0;
+      position: sticky;
+      top: 88px;
+      max-height: calc(100vh - 112px);
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .section {
+      padding-bottom: 24px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .section:last-child {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .section-heading {
+      margin: 0 0 4px;
+      font-size: 15px;
+      font-weight: 750;
+      letter-spacing: -0.01em;
+    }
+
+    .section-description {
+      color: var(--muted);
+      font-size: 12px;
+      margin: 0 0 16px;
+    }
+
+    .field {
+      margin-bottom: 15px;
+    }
+
+    .field:last-child {
+      margin-bottom: 0;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      font-weight: 700;
+      color: #3d4956;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      color: var(--ink);
+      padding: 9px 10px;
+      min-height: 38px;
+    }
+
+    textarea {
+      min-height: 100px;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    textarea.compact {
+      min-height: 82px;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: #9aa5b1;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: 1fr 0.8fr 1fr;
+      gap: 12px;
+    }
+
+    .row-editor {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .editor-row {
+      display: grid;
+      grid-template-columns: 108px minmax(0, 1fr) 36px;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .action-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 130px 130px 36px;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .editor-row input,
+    .action-row input {
+      min-width: 0;
+    }
+
+    .timeline-time {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+
+    .icon-button {
+      width: 36px;
+      min-width: 36px;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .icon-button:hover {
+      color: var(--danger);
+      border-color: #d7a3a3;
+      background: var(--danger-bg);
+    }
+
+    .add-row {
+      margin-top: 9px;
+      color: var(--blue);
+      border-color: #b8cbe3;
+      background: var(--blue-soft);
+    }
+
+    .add-row:hover {
+      border-color: #8eafd2;
+      background: #e2ecf8;
+    }
+
+    .preview {
+      padding: 34px 38px;
+      min-height: 500px;
+    }
+
+    .preview-kicker {
+      color: var(--blue);
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      font-size: 10px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .preview h1 {
+      font-size: clamp(25px, 3vw, 36px);
+      line-height: 1.15;
+      letter-spacing: -0.035em;
+      margin: 0 0 8px;
+      overflow-wrap: anywhere;
+    }
+
+    .metadata {
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 30px;
+    }
+
+    .metadata span + span::before {
+      content: "·";
+      margin: 0 8px;
+      color: #a4adb8;
+    }
+
+    .preview-section {
+      margin: 0 0 28px;
+    }
+
+    .preview-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .preview h2 {
+      font-size: 15px;
+      margin: 0 0 9px;
+      padding-bottom: 7px;
+      border-bottom: 1px solid var(--line);
+      letter-spacing: -0.01em;
+    }
+
+    .preview p {
+      margin: 0;
+      color: #394552;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+
+    .empty-text {
+      color: #a0a9b3 !important;
+      font-style: italic;
+    }
+
+    .doc-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .doc-table th,
+    .doc-table td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .doc-table th {
+      color: #596675;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 750;
+      background: #fafbfd;
+    }
+
+    .doc-table td:first-child {
+      width: 108px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: var(--blue-dark);
+      white-space: nowrap;
+    }
+
+    .action-table td:nth-child(2) {
+      width: 110px;
+    }
+
+    .action-table td:nth-child(3) {
+      width: 105px;
+      white-space: nowrap;
+    }
+
+    .severity {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      background: #f8fafc;
+    }
+
+    .blameless-panel {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fafbfd;
+    }
+
+    .blameless-panel.has-flags {
+      border-color: #e6ca82;
+      background: var(--amber-bg);
+    }
+
+    .blameless-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .flag-count {
+      color: var(--green);
+    }
+
+    .has-flags .flag-count {
+      color: var(--amber);
+    }
+
+    .flag-list {
+      margin: 8px 0 0;
+      padding: 0;
+      list-style: none;
+      font-size: 12px;
+    }
+
+    .flag-list li {
+      padding: 7px 0;
+      border-top: 1px solid rgba(154, 103, 0, 0.18);
+      color: #5b4a24;
+    }
+
+    .flag-list strong {
+      color: #493b1d;
+    }
+
+    .flag-suggestion {
+      display: block;
+      margin-top: 2px;
+      color: #6e6250;
+    }
+
+    .toast {
+      position: fixed;
+      right: 22px;
+      bottom: 22px;
+      background: #202a35;
+      color: white;
+      padding: 10px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      box-shadow: 0 8px 25px rgba(0,0,0,0.18);
+      transform: translateY(12px);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s, transform 0.18s;
+      z-index: 50;
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .no-items {
+      color: #a0a9b3;
+      font-size: 13px;
+      font-style: italic;
+    }
+
+    .helper {
+      color: var(--muted);
+      font-size: 11px;
+      margin-top: 5px;
+    }
+
+    @media (max-width: 1000px) {
+      .workspace {
+        grid-template-columns: 1fr;
+      }
+
+      .preview-column {
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+
+      .preview {
+        min-height: 0;
+      }
+    }
+
+    @media (max-width: 680px) {
+      .header-inner {
+        align-items: flex-start;
+        flex-direction: column;
+        padding: 12px 16px;
+      }
+
+      .header-actions {
+        width: 100%;
+        justify-content: flex-start;
+      }
+
+      .saved-status {
+        margin-right: auto;
+      }
+
+      .app {
+        padding: 12px;
+      }
+
+      .form-panel {
+        padding: 16px;
+      }
+
+      .preview {
+        padding: 24px 18px;
+      }
+
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+        gap: 0;
+      }
+
+      .editor-row {
+        grid-template-columns: 92px minmax(0, 1fr) 36px;
+      }
+
+      .action-row {
+        grid-template-columns: minmax(0, 1fr) 1fr 1fr 36px;
+      }
+    }
+
+    @media (max-width: 430px) {
+      body {
+        font-size: 14px;
+      }
+
+      .brand-subtitle {
+        display: none;
+      }
+
+      .header-actions {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+      }
+
+      .saved-status {
+        grid-column: 1 / -1;
+        text-align: left;
+      }
+
+      .header-actions .button {
+        width: 100%;
+      }
+
+      .workspace {
+        gap: 12px;
+      }
+
+      .editor-row {
+        grid-template-columns: 1fr 36px;
+      }
+
+      .editor-row input:first-child {
+        grid-column: 1;
+      }
+
+      .editor-row input:nth-child(2) {
+        grid-column: 1;
+      }
+
+      .editor-row .icon-button {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+      }
+
+      .action-row {
+        grid-template-columns: 1fr 1fr 36px;
+      }
+
+      .action-row input:first-child {
+        grid-column: 1 / -1;
+      }
+
+      .action-row input:nth-child(2) {
+        grid-column: 1;
+      }
+
+      .action-row input:nth-child(3) {
+        grid-column: 2;
+      }
+
+      .action-row .icon-button {
+        grid-column: 3;
+        grid-row: 2;
+      }
+
+      .doc-table {
+        font-size: 12px;
+      }
+
+      .doc-table th,
+      .doc-table td {
+        padding: 7px 5px;
+      }
+
+      .doc-table td:first-child {
+        width: 80px;
+      }
+
+      .action-table td:nth-child(2),
+      .action-table td:nth-child(3) {
+        width: auto;
+      }
+    }
+
+    @media (max-width: 360px) {
+      .app {
+        padding: 8px;
+      }
+
+      .form-panel {
+        padding: 12px;
+      }
+
+      .preview {
+        padding: 20px 14px;
+      }
+
+      .preview h1 {
+        font-size: 24px;
+      }
+
+      .header-inner {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+    }
+
+    @media print {
+      .app-header,
+      .form-panel,
+      .blameless-panel,
+      .preview-kicker {
+        display: none !important;
+      }
+
+      body,
+      .app {
+        background: white;
+      }
+
+      .app {
+        max-width: none;
+        padding: 0;
+      }
+
+      .workspace {
+        display: block;
+      }
+
+      .preview-column {
+        max-height: none;
+        overflow: visible;
+      }
+
+      .panel {
+        border: 0;
+        box-shadow: none;
+      }
+
+      .preview {
+        padding: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-name">Postmortem Writer</div>
+        <div class="brand-subtitle">10-minute, blameless incident reports</div>
+      </div>
+      <div class="header-actions">
+        <span class="saved-status" id="savedStatus" aria-live="polite">Saved</span>
+        <button class="button" id="exampleBtn" type="button">Load example</button>
+        <button class="button" id="clearBtn" type="button">Clear</button>
+        <button class="button" id="copyBtn" type="button">Copy as Markdown</button>
+        <button class="button primary" id="downloadBtn" type="button">Download .md</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app">
+    <div class="workspace">
+      <section class="panel form-panel" aria-label="Postmortem form">
+        <form id="postmortemForm" novalidate>
+          <div class="section">
+            <h2 class="section-heading">Incident</h2>
+            <p class="section-description">Start with the facts. The document on the right updates as you type.</p>
+
+            <div class="field">
+              <label for="title">Incident title</label>
+              <input id="title" name="title" type="text" autocomplete="off" spellcheck="true" aria-describedby="titleHelp">
+              <div class="helper" id="titleHelp">Use a concise description of what happened.</div>
+            </div>
+
+            <div class="grid-3">
+              <div class="field">
+                <label for="date">Date</label>
+                <input id="date" name="date" type="date">
+              </div>
+              <div class="field">
+                <label for="severity">Severity</label>
+                <select id="severity" name="severity">
+                  <option value="SEV1">SEV1</option>
+                  <option value="SEV2" selected>SEV2</option>
+                  <option value="SEV3">SEV3</option>
+                  <option value="SEV4">SEV4</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="duration">Duration (minutes)</label>
+                <input id="duration" name="duration" type="number" min="0" step="1" inputmode="numeric">
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-heading">Impact and detection</h2>
+            <p class="section-description">Describe what customers experienced and how the team became aware of the incident.</p>
+
+            <div class="field">
+              <label for="impact">Customer impact</label>
+              <textarea id="impact" name="impact" spellcheck="true"></textarea>
+            </div>
+
+            <div class="field">
+              <label for="detection">How was it detected?</label>
+              <textarea id="detection" name="detection" class="compact" spellcheck="true"></textarea>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-heading">Timeline</h2>
+            <p class="section-description">Record observable events in chronological order. Times use your local time.</p>
+
+            <div class="row-editor" id="timelineRows"></div>
+            <button class="button add-row" id="addTimelineBtn" type="button">+ Add timeline event</button>
+          </div>
+
+          <div class="section">
+            <h2 class="section-heading">Analysis</h2>
+            <p class="section-description">Focus on system conditions and contributing factors rather than individual actions.</p>
+
+            <div class="field">
+              <label for="rootCause">Root cause</label>
+              <textarea id="rootCause" name="rootCause" spellcheck="true"></textarea>
+            </div>
+
+            <div class="field">
+              <label for="contributingFactors">Contributing factors</label>
+              <textarea id="contributingFactors" name="contributingFactors" spellcheck="true"></textarea>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-heading">Reflection</h2>
+            <p class="section-description">Capture the parts of the response that helped and the parts that need improvement.</p>
+
+            <div class="field">
+              <label for="wentWell">What went well</label>
+              <textarea id="wentWell" name="wentWell" class="compact" spellcheck="true"></textarea>
+            </div>
+
+            <div class="field">
+              <label for="wentBadly">What went badly</label>
+              <textarea id="wentBadly" name="wentBadly" class="compact" spellcheck="true"></textarea>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-heading">Action items</h2>
+            <p class="section-description">Turn the findings into specific follow-up work with an owner and due date.</p>
+
+            <div class="row-editor" id="actionRows"></div>
+            <button class="button add-row" id="addActionBtn" type="button">+ Add action item</button>
+          </div>
+        </form>
+      </section>
+
+      <aside class="preview-column">
+        <article class="panel preview" id="preview" aria-label="Live postmortem preview">
+          <div class="preview-kicker">Incident postmortem</div>
+          <h1 id="previewTitle">Untitled incident</h1>
+          <div class="metadata" id="previewMetadata"></div>
+
+          <section class="preview-section">
+            <h2>Summary</h2>
+            <p id="previewSummary" class="empty-text">Add the incident details to generate a summary.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>Impact</h2>
+            <p id="previewImpact" class="empty-text">No customer impact described yet.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>Timeline</h2>
+            <div id="previewTimeline"></div>
+          </section>
+
+          <section class="preview-section">
+            <h2>Root cause</h2>
+            <p id="previewRootCause" class="empty-text">No root cause described yet.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>Contributing factors</h2>
+            <p id="previewFactors" class="empty-text">No contributing factors described yet.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>What went well</h2>
+            <p id="previewWell" class="empty-text">Nothing added yet.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>What went badly</h2>
+            <p id="previewBadly" class="empty-text">Nothing added yet.</p>
+          </section>
+
+          <section class="preview-section">
+            <h2>Action items</h2>
+            <div id="previewActions"></div>
+          </section>
+        </article>
+
+        <div class="blameless-panel" id="blamelessPanel">
+          <div class="blameless-header">
+            <span>Blameless check</span>
+            <span class="flag-count" id="flagCount">0 flags</span>
+          </div>
+          <ul class="flag-list" id="flagList" hidden></ul>
+        </div>
+      </aside>
+    </div>
+  </main>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      const STORAGE_KEY = "postmortem-writer-v1";
+
+      const fieldIds = [
+        "title",
+        "date",
+        "severity",
+        "duration",
+        "impact",
+        "detection",
+        "rootCause",
+        "contributingFactors",
+        "wentWell",
+        "wentBadly"
+      ];
+
+      const textareaIds = [
+        "impact",
+        "detection",
+        "rootCause",
+        "contributingFactors",
+        "wentWell",
+        "wentBadly"
+      ];
+
+      const flagRules = [
+        {
+          regex: /\bfault(?:y)?\b/gi,
+          label: "fault",
+          suggestion: "system condition, failure mode, or contributing condition"
+        },
+        {
+          regex: /\bblame(?:d|s|ing)?\b/gi,
+          label: "blame",
+          suggestion: "focus on the system, process, or conditions"
+        },
+        {
+          regex: /\bcareless(?:ly)?\b/gi,
+          label: "careless",
+          suggestion: "describe the specific action or missing safeguard"
+        },
+        {
+          regex: /\bshould have known\b/gi,
+          label: "should have known",
+          suggestion: "describe what information or safeguard was unavailable"
+        },
+        {
+          regex: /\bmistake by\b/gi,
+          label: "mistake by",
+          suggestion: "error or condition in the process"
+        },
+        {
+          regex: /\bnegligent\b/gi,
+          label: "negligent",
+          suggestion: "describe the specific behavior or control gap"
+        },
+        {
+          regex: /\blazy\b/gi,
+          label: "lazy",
+          suggestion: "describe the missed action or constraint"
+        },
+        {
+          regex: /\bbecause\s+([A-Z][a-z]+)\b/g,
+          label: "individual name after “because”",
+          suggestion: "because the system, process, or condition..."
+        }
+      ];
+
+      const $ = (id) => document.getElementById(id);
+
+      let saveTimer = null;
+      let toastTimer = null;
+
+      function escapeHTML(value) {
+        return String(value == null ? "" : value)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;")
+          .replace(/'/g, "&#039;");
+      }
+
+      function escapeMarkdown(value) {
+        return String(value == null ? "" : value)
+          .replace(/\\/g, "\\\\")
+          .replace(/\|/g, "\\|");
+      }
+
+      function clean(value) {
+        return String(value || "").trim();
+      }
+
+      function formatDate(value) {
+        if (!value) return "Date not specified";
+        const parts = value.split("-");
+        if (parts.length !== 3) return value;
+        const date = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+        if (Number.isNaN(date.getTime())) return value;
+        return new Intl.DateTimeFormat(undefined, {
+          year: "numeric",
+          month: "short",
+          day: "numeric"
+        }).format(date);
+      }
+
+      function durationText(value) {
+        const minutes = Number(value);
+        if (!Number.isFinite(minutes) || minutes < 0) return "Duration not specified";
+        if (minutes === 0) return "0 minutes";
+        if (minutes === 1) return "1 minute";
+        if (minutes < 60) return minutes + " minutes";
+        const hours = Math.floor(minutes / 60);
+        const remaining = minutes % 60;
+        if (!remaining) return hours + (hours === 1 ? " hour" : " hours");
+        return hours + (hours === 1 ? " hour " : " hours ") + remaining + " minutes";
+      }
+
+      function pluralFlags(count) {
+        return count + (count === 1 ? " flag" : " flags");
+      }
+
+      function showToast(message) {
+        const toast = $("toast");
+        toast.textContent = message;
+        toast.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => toast.classList.remove("show"), 2200);
+      }
+
+      function setSavedStatus(text) {
+        $("savedStatus").textContent = text;
+      }
+
+      function makeTimelineRow(data = {}) {
+        const row = document.createElement("div");
+        row.className = "editor-row timeline-row";
+        row.innerHTML = `
+          <input class="timeline-time" type="time" aria-label="Timeline time" value="${escapeHTML(data.time || "")}">
+          <input class="timeline-event" type="text" aria-label="Timeline event" placeholder="What happened?" value="${escapeHTML(data.event || "")}">
+          <button class="icon-button remove-row" type="button" aria-label="Remove timeline event" title="Remove timeline event">×</button>
+        `;
+        $("timelineRows").appendChild(row);
+        return row;
+      }
+
+      function makeActionRow(data = {}) {
+        const row = document.createElement("div");
+        row.className = "action-row action-editor-row";
+        row.innerHTML = `
+          <input class="action-text" type="text" aria-label="Action item" placeholder="Action to take" value="${escapeHTML(data.action || "")}">
+          <input class="action-owner" type="text" aria-label="Action owner" placeholder="Owner" value="${escapeHTML(data.owner || "")}">
+          <input class="action-due" type="date" aria-label="Action due date" value="${escapeHTML(data.due || "")}">
+          <button class="icon-button remove-row" type="button" aria-label="Remove action item" title="Remove action item">×</button>
+        `;
+        $("actionRows").appendChild(row);
+        return row;
+      }
+
+      function getRows() {
+        const timeline = Array.from(document.querySelectorAll(".timeline-row")).map(row => ({
+          time: row.querySelector(".timeline-time").value,
+          event: row.querySelector(".timeline-event").value
+        }));
+
+        const actions = Array.from(document.querySelectorAll(".action-editor-row")).map(row => ({
+          action: row.querySelector(".action-text").value,
+          owner: row.querySelector(".action-owner").value,
+          due: row.querySelector(".action-due").value
+        }));
+
+        return { timeline, actions };
+      }
+
+      function getState() {
+        const state = {};
+        fieldIds.forEach(id => {
+          state[id] = $(id).value;
+        });
+        const rows = getRows();
+        state.timeline = rows.timeline;
+        state.actions = rows.actions;
+        return state;
+      }
+
+      function applyState(state) {
+        fieldIds.forEach(id => {
+          if ($(id) && state && Object.prototype.hasOwnProperty.call(state, id)) {
+            $(id).value = state[id];
+          }
+        });
+
+        $("timelineRows").innerHTML = "";
+        const timeline = Array.isArray(state && state.timeline) ? state.timeline : [];
+        if (timeline.length) {
+          timeline.forEach(item => makeTimelineRow(item));
+        } else {
+          makeTimelineRow();
+          makeTimelineRow();
+          makeTimelineRow();
+        }
+
+        $("actionRows").innerHTML = "";
+        const actions = Array.isArray(state && state.actions) ? state.actions : [];
+        actions.forEach(item => makeActionRow(item));
+
+        render();
+      }
+
+      function saveState() {
+        clearTimeout(saveTimer);
+        setSavedStatus("Saving…");
+        saveTimer = setTimeout(() => {
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(getState()));
+            setSavedStatus("Saved");
+          } catch (error) {
+            setSavedStatus("Not saved");
+          }
+        }, 180);
+      }
+
+      function loadSavedState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return false;
+          const state = JSON.parse(raw);
+          if (!state || typeof state !== "object") return false;
+          applyState(state);
+          setSavedStatus("Saved");
+          return true;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      function clearForm() {
+        fieldIds.forEach(id => {
+          if (id === "severity") {
+            $(id).value = "SEV2";
+          } else {
+            $(id).value = "";
+          }
+        });
+
+        $("timelineRows").innerHTML = "";
+        makeTimelineRow();
+        makeTimelineRow();
+        makeTimelineRow();
+
+        $("actionRows").innerHTML = "";
+
+        try {
+          localStorage.removeItem(STORAGE_KEY);
+        } catch (error) {}
+
+        setSavedStatus("Saved");
+        render();
+        showToast("Postmortem cleared");
+      }
+
+      function loadExample() {
+        const example = {
+          title: "Database connection-pool exhaustion caused elevated API errors",
+          date: "2026-10-03",
+          severity: "SEV2",
+          duration: "47",
+          impact: "From 14:03 to 14:50 UTC, approximately 18% of API requests returned 5xx errors. Customers using the checkout and account endpoints experienced intermittent failures. No data was lost or corrupted.",
+          detection: "The API error-rate alert fired when the 5-minute 5xx rate crossed its threshold. The on-call engineer confirmed the increase in the application dashboard and began investigating database connectivity.",
+          timeline: [
+            { time: "14:03", event: "API 5xx error-rate alert fired." },
+            { time: "14:07", event: "On-call confirmed elevated errors and identified database connection timeout errors in application logs." },
+            { time: "14:14", event: "Connection-pool utilization reached 100% on the affected API instances." },
+            { time: "14:22", event: "Traffic was redistributed to healthy instances while the team investigated the connection leak." },
+            { time: "14:38", event: "A rolling restart released exhausted connections and error rates began returning to baseline." },
+            { time: "14:50", event: "Error rate and database connection utilization returned to normal; incident resolved." }
+          ],
+          rootCause: "A new request path introduced in the previous deployment could retain a database connection longer than intended when a downstream operation timed out. Under elevated traffic, retained connections accumulated until the application connection pools reached their configured limits.",
+          contributingFactors: "The connection-pool utilization metric was available but was not included in the primary service dashboard. The integration test suite did not exercise the downstream timeout path. Pool exhaustion also took several minutes to become visible as customer-facing errors.",
+          wentWell: "The error-rate alert detected the customer impact quickly. Existing dashboards and logs gave the response team enough information to connect the API failures to database connection timeouts. Rolling restarts provided a safe short-term recovery path.",
+          wentBadly: "The first dashboard did not expose connection-pool saturation, which added investigation time. The timeout path was not covered by an integration test. Recovery relied on a manual rolling restart rather than an automated mitigation.",
+          actions: [
+            { action: "Add connection-pool utilization and wait time to the API service dashboard.", owner: "Platform", due: "2026-10-08" },
+            { action: "Add integration coverage for downstream timeout and connection-release behavior.", owner: "API team", due: "2026-10-10" },
+            { action: "Review connection handling and add an explicit pool-exhaustion alert.", owner: "Platform", due: "2026-10-12" },
+            { action: "Evaluate automatic recovery when sustained pool exhaustion is detected.", owner: "SRE", due: "2026-10-17" }
+          ]
+        };
+
+        applyState({
+          title: example.title,
+          date: example.date,
+          severity: example.severity,
+          duration: example.duration,
+          impact: example.impact,
+          detection: example.detection,
+          rootCause: example.rootCause,
+          contributingFactors: example.contributingFactors,
+          wentWell: example.wentWell,
+          wentBadly: example.wentBadly,
+          timeline: example.timeline,
+          actions: example.actions
+        });
+
+        saveState();
+        showToast("Example loaded");
+      }
+
+      function render() {
+        const state = getState();
+
+        const title = clean(state.title) || "Untitled incident";
+        $("previewTitle").textContent = title;
+
+        const dateText = formatDate(state.date);
+        const severityText = clean(state.severity) || "SEV2";
+        const duration = durationText(state.duration);
+
+        $("previewMetadata").innerHTML = `
+          <span>${escapeHTML(dateText)}</span>
+          <span><span class="severity">${escapeHTML(severityText)}</span></span>
+          <span>${escapeHTML(duration)}</span>
+        `;
+
+        const impact = clean(state.impact);
+        const detection = clean(state.detection);
+        const rootCause = clean(state.rootCause);
+
+        let summary = "";
+        if (impact || detection || rootCause) {
+          const parts = [];
+          if (impact) parts.push("Customers were affected: " + impact);
+          if (detection) parts.push("The incident was detected through " + detection.charAt(0).toLowerCase() + detection.slice(1));
+          if (rootCause) parts.push("The underlying cause was " + rootCause.charAt(0).toLowerCase() + rootCause.slice(1));
+          summary = parts.join(" ");
+        }
+
+        setPreviewText("previewSummary", summary, "Add the incident details to generate a summary.");
+        setPreviewText("previewImpact", impact, "No customer impact described yet.");
+        setPreviewText("previewRootCause", rootCause, "No root cause described yet.");
+        setPreviewText("previewFactors", clean(state.contributingFactors), "No contributing factors described yet.");
+        setPreviewText("previewWell", clean(state.wentWell), "Nothing added yet.");
+        setPreviewText("previewBadly", clean(state.wentBadly), "Nothing added yet.");
+
+        renderTimeline(state.timeline);
+        renderActions(state.actions);
+        renderBlamelessCheck();
+      }
+
+      function setPreviewText(id, value, emptyMessage) {
+        const el = $(id);
+        if (value) {
+          el.textContent = value;
+          el.classList.remove("empty-text");
+        } else {
+          el.textContent = emptyMessage;
+          el.classList.add("empty-text");
+        }
+      }
+
+      function renderTimeline(timeline) {
+        const container = $("previewTimeline");
+        const rows = (timeline || []).filter(item => clean(item.time) || clean(item.event));
+
+        if (!rows.length) {
+          container.innerHTML = '<div class="no-items">No timeline events added yet.</div>';
+          return;
+        }
+
+        const body = rows.map(item => `
+          <tr>
+            <td>${escapeHTML(item.time || "—")}</td>
+            <td>${escapeHTML(item.event || "—")}</td>
+          </tr>
+        `).join("");
+
+        container.innerHTML = `
+          <table class="doc-table" aria-label="Incident timeline">
+            <thead>
+              <tr><th>Time</th><th>Event</th></tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        `;
+      }
+
+      function renderActions(actions) {
+        const container = $("previewActions");
+        const rows = (actions || []).filter(item =>
+          clean(item.action) || clean(item.owner) || clean(item.due)
+        );
+
+        if (!rows.length) {
+          container.innerHTML = '<div class="no-items">No action items added yet.</div>';
+          return;
+        }
+
+        const body = rows.map(item => `
+          <tr>
+            <td>${escapeHTML(item.action || "—")}</td>
+            <td>${escapeHTML(item.owner || "—")}</td>
+            <td>${escapeHTML(item.due ? formatDate(item.due) : "—")}</td>
+          </tr>
+        `).join("");
+
+        container.innerHTML = `
+          <table class="doc-table action-table" aria-label="Action items">
+            <thead>
+              <tr><th>Action</th><th>Owner</th><th>Due</th></tr>
+            </thead>
+            <tbody>${body}</tbody>
+          </table>
+        `;
+      }
+
+      function collectTextareas() {
+        return textareaIds.map(id => $(id).value).join("\n");
+      }
+
+      function renderBlamelessCheck() {
+        const text = collectTextareas();
+        const flags = [];
+
+        flagRules.forEach(rule => {
+          rule.regex.lastIndex = 0;
+          let match;
+          while ((match = rule.regex.exec(text)) !== null) {
+            flags.push({
+              label: rule.label,
+              matched: match[0],
+              suggestion: rule.suggestion
+            });
+
+            if (rule.regex.lastIndex === match.index) {
+              rule.regex.lastIndex++;
+            }
+          }
+        });
+
+        flags.sort((a, b) => a.matched.localeCompare(b.matched));
+
+        const panel = $("blamelessPanel");
+        const count = $("flagCount");
+        const list = $("flagList");
+
+        count.textContent = "Blameless check: " + pluralFlags(flags.length);
+
+        if (!flags.length) {
+          panel.classList.remove("has-flags");
+          list.hidden = true;
+          list.innerHTML = "";
+          return;
+        }
+
+        panel.classList.add("has-flags");
+        list.hidden = false;
+
+        list.innerHTML = flags.map(flag => `
+          <li>
+            <strong>“${escapeHTML(flag.matched)}”</strong>
+            <span class="flag-suggestion">Consider: ${escapeHTML(flag.suggestion)}.</span>
+          </li>
+        `).join("");
+      }
+
+      function generateMarkdown() {
+        const state = getState();
+        const title = clean(state.title) || "Untitled incident";
+        const severity = clean(state.severity) || "SEV2";
+        const date = clean(state.date) ? formatDate(state.date) : "Not specified";
+        const duration = durationText(state.duration);
+
+        const lines = [];
+
+        lines.push("# " + title);
+        lines.push("");
+        lines.push(`**Date:** ${date}  `);
+        lines.push(`**Severity:** ${severity}  `);
+        lines.push(`**Duration:** ${duration}`);
+        lines.push("");
+
+        lines.push("## Summary");
+        lines.push("");
+        const summaryParts = [];
+        if (clean(state.impact)) summaryParts.push("Customers were affected: " + clean(state.impact));
+        if (clean(state.detection)) summaryParts.push("The incident was detected through " + lowerInitial(clean(state.detection)));
+        if (clean(state.rootCause)) summaryParts.push("The underlying cause was " + lowerInitial(clean(state.rootCause)));
+        lines.push(summaryParts.length ? summaryParts.join(" ") : "No summary information has been added yet.");
+        lines.push("");
+
+        lines.push("## Impact");
+        lines.push("");
+        lines.push(clean(state.impact) || "No customer impact described yet.");
+        lines.push("");
+
+        lines.push("## Timeline");
+        lines.push("");
+        const timeline = (state.timeline || []).filter(item => clean(item.time) || clean(item.event));
+        if (timeline.length) {
+          lines.push("| Time | Event |");
+          lines.push("| --- | --- |");
+          timeline.forEach(item => {
+            lines.push(`| ${escapeMarkdown(item.time || "—")} | ${escapeMarkdown(item.event || "—")} |`);
+          });
+        } else {
+          lines.push("No timeline events added yet.");
+        }
+        lines.push("");
+
+        lines.push("## Root cause");
+        lines.push("");
+        lines.push(clean(state.rootCause) || "No root cause described yet.");
+        lines.push("");
+
+        lines.push("## Contributing factors");
+        lines.push("");
+        lines.push(clean(state.contributingFactors) || "No contributing factors described yet.");
+        lines.push("");
+
+        lines.push("## What went well");
+        lines.push("");
+        lines.push(clean(state.wentWell) || "Nothing added yet.");
+        lines.push("");
+
+        lines.push("## What went badly");
+        lines.push("");
+        lines.push(clean(state.wentBadly) || "Nothing added yet.");
+        lines.push("");
+
+        lines.push("## Action items");
+        lines.push("");
+        const actions = (state.actions || []).filter(item =>
+          clean(item.action) || clean(item.owner) || clean(item.due)
+        );
+        if (actions.length) {
+          lines.push("| Action | Owner | Due |");
+          lines.push("| --- | --- | --- |");
+          actions.forEach(item => {
+            lines.push(
+              `| ${escapeMarkdown(item.action || "—")} | ${escapeMarkdown(item.owner || "—")} | ${escapeMarkdown(item.due ? formatDate(item.due) : "—")} |`
+            );
+          });
+        } else {
+          lines.push("No action items added yet.");
+        }
+        lines.push("");
+
+        return lines.join("\n");
+      }
+
+      function lowerInitial(value) {
+        if (!value) return value;
+        return value.charAt(0).toLowerCase() + value.slice(1);
+      }
+
+      function filename() {
+        const state = getState();
+        const title = clean(state.title) || "postmortem";
+        const date = clean(state.date) || new Date().toISOString().slice(0, 10);
+        const safeTitle = title
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 80) || "postmortem";
+        return `${safeTitle}-${date}.md`;
+      }
+
+      async function copyMarkdown() {
+        const markdown = generateMarkdown();
+
+        try {
+          await navigator.clipboard.writeText(markdown);
+          showToast("Markdown copied to clipboard");
+        } catch (error) {
+          const area = document.createElement("textarea");
+          area.value = markdown;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.left = "-9999px";
+          document.body.appendChild(area);
+          area.select();
+
+          try {
+            document.execCommand("copy");
+            showToast("Markdown copied to clipboard");
+          } catch (fallbackError) {
+            showToast("Could not copy automatically");
+          }
+
+          document.body.removeChild(area);
+        }
+      }
+
+      function downloadMarkdown() {
+        const markdown = generateMarkdown();
+        const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+
+        anchor.href = url;
+        anchor.download = filename();
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        showToast("Markdown downloaded");
+      }
+
+      function handleInput(event) {
+        if (
+          event.target.matches("input") ||
+          event.target.matches("select") ||
+          event.target.matches("textarea")
+        ) {
+          render();
+          saveState();
+        }
+      }
+
+      function handleRemove(event) {
+        const button = event.target.closest(".remove-row");
+        if (!button) return;
+
+        const row = button.closest(".editor-row, .action-row");
+        if (!row) return;
+
+        const parent = row.parentElement;
+        row.remove();
+
+        if (parent === $("timelineRows") && !$("timelineRows").children.length) {
+          makeTimelineRow();
+        }
+
+        render();
+        saveState();
+      }
+
+      $("postmortemForm").addEventListener("input", handleInput);
+      $("postmortemForm").addEventListener("change", handleInput);
+      $("timelineRows").addEventListener("click", handleRemove);
+      $("actionRows").addEventListener("click", handleRemove);
+
+      $("addTimelineBtn").addEventListener("click", () => {
+        const row = makeTimelineRow();
+        row.querySelector(".timeline-time").focus();
+        saveState();
+      });
+
+      $("addActionBtn").addEventListener("click", () => {
+        const row = makeActionRow();
+        row.querySelector(".action-text").focus();
+        saveState();
+      });
+
+      $("copyBtn").addEventListener("click", copyMarkdown);
+      $("downloadBtn").addEventListener("click", downloadMarkdown);
+      $("exampleBtn").addEventListener("click", loadExample);
+
+      $("clearBtn").addEventListener("click", () => {
+        const hasContent = fieldIds.some(id => clean($(id).value)) ||
+          document.querySelectorAll(".action-editor-row").length > 0 ||
+          Array.from(document.querySelectorAll(".timeline-row")).some(row =>
+            clean(row.querySelector(".timeline-time").value) ||
+            clean(row.querySelector(".timeline-event").value)
+          );
+
+        if (hasContent && !window.confirm("Clear the current postmortem? This removes the saved draft from this browser.")) {
+          return;
+        }
+
+        clearForm();
+      });
+
+      window.addEventListener("beforeunload", () => {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(getState()));
+        } catch (error) {}
+      });
+
+      if (!loadSavedState()) {
+        $("date").value = new Date().toISOString().slice(0, 10);
+        makeTimelineRow();
+        makeTimelineRow();
+        makeTimelineRow();
+        render();
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(getState()));
+        } catch (error) {}
+      }
+
+      render();
+    })();
+  </script>
+<script>
+(function () {
+  "use strict";
+
+  /*
+   * Share-link feature for Postmortem Writer.
+   * Designed to be pasted immediately before </body>.
+   * It discovers the existing form, controls, row containers, and buttons
+   * from the DOM rather than depending on the app's internal function names.
+   */
+
+  const SHARE_PREFIX = "#pm=";
+
+  function ready(fn) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", fn, { once: true });
+    } else {
+      fn();
+    }
+  }
+
+  function textOf(el) {
+    return (el && el.textContent || "").trim().replace(/\s+/g, " ");
+  }
+
+  function getForm() {
+    return document.querySelector("form");
+  }
+
+  function getAddButtons() {
+    return Array.from(document.querySelectorAll("button")).filter(function (button) {
+      const text = textOf(button).toLowerCase();
+      return text.includes("add timeline") || text.includes("add action");
+    });
+  }
+
+  function getRowContainers() {
+    const result = {
+      timeline: null,
+      actions: null
+    };
+
+    getAddButtons().forEach(function (button) {
+      const text = textOf(button).toLowerCase();
+      const previous = button.previousElementSibling;
+
+      if (!previous) return;
+
+      if (text.includes("timeline")) {
+        result.timeline = previous;
+      } else if (text.includes("action")) {
+        result.actions = previous;
+      }
+    });
+
+    return result;
+  }
+
+  function getScalarFields(form, containers) {
+    const fields = {};
+    if (!form) return fields;
+
+    Array.from(form.querySelectorAll("input, select, textarea")).forEach(function (field) {
+      if (!field.id && !field.name) return;
+
+      const insideTimeline = containers.timeline && containers.timeline.contains(field);
+      const insideActions = containers.actions && containers.actions.contains(field);
+
+      if (insideTimeline || insideActions) return;
+
+      const key = field.id || field.name;
+
+      if (field.type === "checkbox" || field.type === "radio") {
+        fields[key] = field.checked;
+      } else {
+        fields[key] = field.value;
+      }
+    });
+
+    return fields;
+  }
+
+  function getRowFields(container) {
+    if (!container) return [];
+
+    return Array.from(container.children).map(function (row) {
+      const fields = Array.from(row.querySelectorAll("input, select, textarea"));
+      return fields.map(function (field) {
+        return {
+          key: field.id || field.name || "",
+          value: field.type === "checkbox" || field.type === "radio"
+            ? field.checked
+            : field.value
+        };
+      });
+    }).filter(function (row) {
+      return row.length > 0;
+    });
+  }
+
+  function collectState() {
+    const form = getForm();
+    const containers = getRowContainers();
+
+    return {
+      version: 1,
+      fields: getScalarFields(form, containers),
+      timeline: getRowFields(containers.timeline),
+      actions: getRowFields(containers.actions)
+    };
+  }
+
+  function utf8ToBase64Url(text) {
+    const bytes = new TextEncoder().encode(text);
+    let binary = "";
+
+    for (let i = 0; i < bytes.length; i += 1) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+
+    return btoa(binary)
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=+$/g, "");
+  }
+
+  function base64UrlToUtf8(value) {
+    const base64 = value
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const padded = base64 + "=".repeat((4 - base64.length % 4) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+
+    return new TextDecoder().decode(bytes);
+  }
+
+  function encodeState(state) {
+    return utf8ToBase64Url(JSON.stringify(state));
+  }
+
+  function decodeState(encoded) {
+    return JSON.parse(base64UrlToUtf8(encoded));
+  }
+
+  function setFieldValue(field, value) {
+    if (!field) return;
+
+    if (field.type === "checkbox" || field.type === "radio") {
+      field.checked = Boolean(value);
+    } else {
+      field.value = value == null ? "" : String(value);
+    }
+  }
+
+  function dispatchFieldEvents(field) {
+    if (!field) return;
+
+    field.dispatchEvent(new Event("input", {
+      bubbles: true
+    }));
+
+    field.dispatchEvent(new Event("change", {
+      bubbles: true
+    }));
+  }
+
+  function setScalarFields(state) {
+    const form = getForm();
+    const containers = getRowContainers();
+
+    if (!form || !state || !state.fields) return;
+
+    Array.from(form.querySelectorAll("input, select, textarea")).forEach(function (field) {
+      if (!field.id && !field.name) return;
+
+      if (containers.timeline && containers.timeline.contains(field)) return;
+      if (containers.actions && containers.actions.contains(field)) return;
+
+      const key = field.id || field.name;
+
+      if (Object.prototype.hasOwnProperty.call(state.fields, key)) {
+        setFieldValue(field, state.fields[key]);
+        dispatchFieldEvents(field);
+      }
+    });
+  }
+
+  function findFieldInRow(row, savedField, fallbackIndex) {
+    const fields = Array.from(row.querySelectorAll("input, select, textarea"));
+
+    if (savedField && savedField.key) {
+      const exact = fields.find(function (field) {
+        return (field.id || field.name || "") === savedField.key;
+      });
+
+      if (exact) return exact;
+    }
+
+    return fields[fallbackIndex] || null;
+  }
+
+  function clearContainer(container) {
+    if (!container) return;
+    container.innerHTML = "";
+  }
+
+  function addRows(addButton, container, rows) {
+    if (!container || !Array.isArray(rows) || !addButton) return;
+
+    clearContainer(container);
+
+    rows.forEach(function () {
+      /*
+       * The existing app's Add buttons already know how to create the
+       * correct row structure and are already wired to the app's handlers.
+       */
+      addButton.click();
+    });
+
+    const createdRows = Array.from(container.children);
+
+    rows.forEach(function (savedRow, rowIndex) {
+      const row = createdRows[rowIndex];
+      if (!row) return;
+
+      savedRow.forEach(function (savedField, fieldIndex) {
+        const field = findFieldInRow(row, savedField, fieldIndex);
+        if (!field) return;
+
+        setFieldValue(field, savedField.value);
+        dispatchFieldEvents(field);
+      });
+    });
+  }
+
+  function applySharedState(state) {
+    if (!state || typeof state !== "object") {
+      throw new Error("Invalid shared state");
+    }
+
+    const form = getForm();
+    if (!form) throw new Error("Postmortem form not found");
+
+    const containers = getRowContainers();
+    const addButtons = getAddButtons();
+
+    const timelineAdd = addButtons.find(function (button) {
+      return textOf(button).toLowerCase().includes("timeline");
+    });
+
+    const actionsAdd = addButtons.find(function (button) {
+      return textOf(button).toLowerCase().includes("action");
+    });
+
+    setScalarFields(state);
+
+    addRows(
+      timelineAdd,
+      containers.timeline,
+      Array.isArray(state.timeline) ? state.timeline : []
+    );
+
+    addRows(
+      actionsAdd,
+      containers.actions,
+      Array.isArray(state.actions) ? state.actions : []
+    );
+
+    /*
+     * Let the existing application's delegated listeners and autosave
+     * react to the final state. This intentionally avoids depending on
+     * private function names such as render() or saveState().
+     */
+    const firstField = form.querySelector("input, select, textarea");
+
+    if (firstField) {
+      firstField.dispatchEvent(new Event("input", { bubbles: true }));
+      firstField.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+
+    /*
+     * If the original app exposes public render/autosave functions, use
+     * them when available. Otherwise the dispatched events above are enough.
+     */
+    const renderCandidates = [
+      window.render,
+      window.renderPostmortem,
+      window.updatePreview
+    ];
+
+    renderCandidates.forEach(function (fn) {
+      if (typeof fn === "function") {
+        try {
+          fn();
+        } catch (error) {}
+      }
+    });
+
+    const saveCandidates = [
+      window.saveState,
+      window.autosave,
+      window.saveDraft
+    ];
+
+    saveCandidates.forEach(function (fn) {
+      if (typeof fn === "function") {
+        try {
+          fn();
+        } catch (error) {}
+      }
+    });
+  }
+
+  function showToast(message) {
+    /*
+     * Reuse the existing toast if possible.
+     */
+    const existingToast =
+      document.getElementById("toast") ||
+      document.querySelector('[role="status"]');
+
+    if (existingToast) {
+      existingToast.textContent = message;
+
+      if (existingToast.id === "toast") {
+        existingToast.classList.add("show");
+        clearTimeout(existingToast.__shareToastTimer);
+        existingToast.__shareToastTimer = setTimeout(function () {
+          existingToast.classList.remove("show");
+        }, 2600);
+      }
+
+      return;
+    }
+
+    const toast = document.createElement("div");
+    toast.textContent = message;
+
+    Object.assign(toast.style, {
+      position: "fixed",
+      right: "22px",
+      bottom: "22px",
+      zIndex: "9999",
+      maxWidth: "min(420px, calc(100vw - 32px))",
+      padding: "10px 14px",
+      borderRadius: "6px",
+      background: "#202a35",
+      color: "#fff",
+      fontSize: "13px",
+      lineHeight: "1.4",
+      boxShadow: "0 8px 25px rgba(0,0,0,.18)"
+    });
+
+    document.body.appendChild(toast);
+
+    setTimeout(function () {
+      toast.remove();
+    }, 2800);
+  }
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    Object.assign(textarea.style, {
+      position: "fixed",
+      left: "-9999px",
+      top: "0"
+    });
+
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    const copied = document.execCommand("copy");
+    textarea.remove();
+
+    if (!copied) {
+      throw new Error("Clipboard unavailable");
+    }
+  }
+
+  function createShareButton(downloadButton) {
+    if (!downloadButton || document.getElementById("shareLinkButton")) return;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "shareLinkButton";
+    button.className = downloadButton.className || "button";
+    button.textContent = "Share link";
+    button.setAttribute("aria-label", "Share link");
+
+    downloadButton.parentNode.insertBefore(button, downloadButton);
+
+    button.addEventListener("click", async function () {
+      try {
+        const state = collectState();
+        const encoded = encodeState(state);
+        const url = window.location.href.split("#")[0] + SHARE_PREFIX + encoded;
+
+        /*
+         * Keep the current document URL in the address bar without
+         * triggering navigation or a reload.
+         */
+        if (window.history && window.history.replaceState) {
+          window.history.replaceState(null, "", url);
+        } else {
+          window.location.hash = "pm=" + encoded;
+        }
+
+        await copyText(url);
+        showToast("Link copied, anyone with it sees this postmortem");
+      } catch (error) {
+        showToast("Could not create the share link");
+      }
+    });
+  }
+
+  function createSharedBanner() {
+    if (document.getElementById("sharedLinkBanner")) return;
+
+    const banner = document.createElement("div");
+    banner.id = "sharedLinkBanner";
+
+    Object.assign(banner.style, {
+      background: "#eaf1fa",
+      color: "#173b67",
+      borderBottom: "1px solid #b8cbe3",
+      padding: "10px 24px",
+      fontSize: "13px"
+    });
+
+    const inner = document.createElement("div");
+
+    Object.assign(inner.style, {
+      maxWidth: "1440px",
+      margin: "0 auto",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: "16px"
+    });
+
+    const message = document.createElement("span");
+    message.textContent =
+      "Opened from a shared link. Edits stay in your browser until you share again.";
+
+    const dismiss = document.createElement("button");
+    dismiss.type = "button";
+    dismiss.textContent = "Dismiss";
+    dismiss.setAttribute("aria-label", "Dismiss shared link notice");
+
+    Object.assign(dismiss.style, {
+      border: "0",
+      background: "transparent",
+      color: "#174a8b",
+      padding: "4px 0",
+      font: "inherit",
+      fontSize: "12px",
+      fontWeight: "700",
+      cursor: "pointer",
+      whiteSpace: "nowrap"
+    });
+
+    dismiss.addEventListener("click", function () {
+      banner.remove();
+    });
+
+    inner.appendChild(message);
+    inner.appendChild(dismiss);
+    banner.appendChild(inner);
+
+    const header = document.querySelector("header");
+    if (header) {
+      header.insertAdjacentElement("afterend", banner);
+    } else {
+      document.body.insertBefore(banner, document.body.firstChild);
+    }
+  }
+
+  function loadSharedStateFromHash() {
+    const hash = window.location.hash || "";
+
+    if (!hash.startsWith(SHARE_PREFIX)) return false;
+
+    const encoded = hash.slice(SHARE_PREFIX.length);
+    if (!encoded) return false;
+
+    try {
+      const state = decodeState(encoded);
+      applySharedState(state);
+      createSharedBanner();
+      return true;
+    } catch (error) {
+      /*
+       * A malformed or truncated hash should not prevent the normal
+       * localStorage-backed application from loading.
+       */
+      return false;
+    }
+  }
+
+  function init() {
+    const buttons = Array.from(document.querySelectorAll("button"));
+
+    const downloadButton = buttons.find(function (button) {
+      return textOf(button).toLowerCase() === "download .md";
+    });
+
+    createShareButton(downloadButton);
+
+    /*
+     * This runs after the existing app script, so a shared hash takes
+     * precedence over whatever the app restored from localStorage.
+     */
+    loadSharedStateFromHash();
+  }
+
+  ready(init);
+})();
+</script>
+</body>
+</html>
